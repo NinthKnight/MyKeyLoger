@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.25420.1
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TestDriver", "TestDriver\TestDriver.vcxproj", "{3545CD9D-2604-44A0-BBCC-974A3A5B233A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		DriverDebug|x64 = DriverDebug|x64
+		DriverDebug|x86 = DriverDebug|x86
+		DriverRelease|x64 = DriverRelease|x64
+		DriverRelease|x86 = DriverRelease|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverDebug|x64.ActiveCfg = DriverDebug|x64
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverDebug|x64.Build.0 = DriverDebug|x64
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverDebug|x86.ActiveCfg = DriverDebug|Win32
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverDebug|x86.Build.0 = DriverDebug|Win32
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverRelease|x64.ActiveCfg = DriverRelease|x64
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverRelease|x64.Build.0 = DriverRelease|x64
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverRelease|x86.ActiveCfg = DriverRelease|Win32
+		{3545CD9D-2604-44A0-BBCC-974A3A5B233A}.DriverRelease|x86.Build.0 = DriverRelease|Win32
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
