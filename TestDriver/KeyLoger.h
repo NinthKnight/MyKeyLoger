@@ -19,8 +19,17 @@ typedef struct tagThreadContext
 
 }THREADCONTEXT, *PTHREADCONTEXT;
 
+//KEYLST列表中的每一项
+typedef struct tagKeyData
+{
+	LIST_ENTRY LstEntry; //链表头部   
+	USHORT Flags;
+	USHORT MakeCode;
+	CHAR  ch;
+}KEYDATA, *PKEYDATA;
+
 extern POBJECT_TYPE *IoDriverObjectType;
-extern THREADCONTEXT g_ThreadContext;
+extern PTHREADCONTEXT g_pThreadContext;
 
 NTSTATUS
 ObReferenceObjectByName(
@@ -32,4 +41,12 @@ ObReferenceObjectByName(
 	__in KPROCESSOR_MODE AccessMode,
 	__inout_opt PVOID ParseContext,
 	__out PVOID *Object
+);
+
+NTSTATUS
+RtlStringCbPrintfA(
+	OUT LPSTR  pszDest,
+	IN size_t  cbDest,
+	IN LPCSTR  pszFormat,
+	...
 );

