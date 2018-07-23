@@ -31,6 +31,7 @@ typedef struct tagKeyData
 extern POBJECT_TYPE *IoDriverObjectType;
 extern PTHREADCONTEXT g_pThreadContext;
 
+
 NTSTATUS
 ObReferenceObjectByName(
 	__in PUNICODE_STRING ObjectName,

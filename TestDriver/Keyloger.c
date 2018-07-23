@@ -111,12 +111,17 @@ void DriverUnload(PDRIVER_OBJECT DriverObject)
 		1,
 		FALSE);
 
+	ASSERT(KeGetCurrentIrql() <= DISPATCH_LEVEL);
+
 	//等待线程退出
-	ntRet = KeWaitForSingleObject(&g_pThreadContext->pThreadObj,
+	ntRet = KeWaitForSingleObject(g_pThreadContext->pThreadObj,
 		Executive,
 		KernelMode,
 		FALSE,
 		NULL);
+
+	//释放线程参数内存
+	ExFreePool(g_pThreadContext);
 
 	//关闭日志文件
 	ZwClose(g_pThreadContext->hLogFile);
